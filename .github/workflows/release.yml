@@ -1,0 +1,89 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "*"
+
+jobs:
+    verify:
+        name: Verify tag matches script version
+        runs-on: windows-latest
+        outputs:
+            script_version: ${{ steps.set_version.outputs.script_version }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Verify tag equals script version
+              id: verify_script
+              shell: powershell
+              run: |
+                  $tagRef = "${{ github.ref }}"
+                  $tag = $tagRef -replace '^refs/tags/', ''
+                  Write-Host "Tag: $tag"
+                  $out = & .\UsbIpdTool.ps1 -Version 2>&1
+                  $txt = $out -join "`n"
+                  Write-Host "Script output: $txt"
+                  if ($txt -match 'UsbIpdTool\s+([0-9]+(\.[0-9]+){2,3})') {
+                    $ver = $Matches[1]
+                  } else {
+                    Write-Error 'Could not parse version from script output'
+                    exit 1
+                  }
+                  if ($ver -ne $tag) {
+                    Write-Error "Tag version ($tag) does not match script version ($ver)"
+                    exit 1
+                  }
+                  Write-Host 'Tag matches script version.'
+
+            - name: Set output
+              id: set_version
+              shell: powershell
+              run: |
+                  $out = & .\UsbIpdTool.ps1 -Version 2>&1
+                  $txt = $out -join "`n"
+                  if ($txt -match 'UsbIpdTool\s+([0-9]+(\.[0-9]+){2,3})') {
+                    $ver = $Matches[1]
+                  } else {
+                    Write-Error 'Could not parse version from script output'
+                    exit 1
+                  }
+                  Add-Content -Path $env:GITHUB_OUTPUT -Value "script_version=$ver"
+
+    create_release:
+        name: Create GitHub Release
+        needs: verify
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Create Release
+              id: create_release
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: ${{ github.ref_name }}
+                  release_name: "UsbIpdTool ${{ github.ref_name }}"
+                  body: |
+                      Release ${{ github.ref_name }}
+
+                      Script version: ${{ needs.verify.outputs.script_version }}
+                  draft: false
+                  prerelease: false
+
+            - name: Upload script asset
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ steps.create_release.outputs.upload_url }}
+                  asset_path: ./UsbIpdTool.ps1
+                  asset_name: UsbIpdTool.ps1
+                  asset_content_type: application/octet-stream

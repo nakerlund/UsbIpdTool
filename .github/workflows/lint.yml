@@ -1,0 +1,86 @@
+name: Lint
+
+on:
+    push: {}
+
+jobs:
+    markdown:
+        name: Markdown lint
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js (for markdownlint)
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "18"
+
+            - name: Cache npm
+              uses: actions/cache@v4
+              with:
+                  path: ~/.npm
+                  key: ${{ runner.os }}-node-18-${{ hashFiles('**/package-lock.json') }}
+                  restore-keys: |
+                      ${{ runner.os }}-node-18-
+
+            - name: Install markdownlint CLI
+              run: npm install -g markdownlint-cli
+
+            - name: Run markdownlint
+              run: markdownlint "**/*.md"
+
+    pslint:
+        name: PowerShell lint
+        runs-on: windows-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Install PSScriptAnalyzer
+              shell: pwsh
+              run: |
+                  # Install to CurrentUser so no admin rights are required on runner
+                  Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -AllowClobber
+
+            - name: Run PSScriptAnalyzer
+              shell: pwsh
+              run: |
+                  $issues = Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
+
+                  if ($issues) {
+                    $issues | Select-Object ScriptName, Line, RuleName, Severity, Message | Format-Table -AutoSize
+                    throw "PSScriptAnalyzer reported issues"
+                  }
+                  Write-Host 'PSScriptAnalyzer: OK'
+
+    tag-verify:
+        name: Verify tag matches script version
+        runs-on: windows-latest
+        if: startsWith(github.ref, 'refs/tags/')
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Verify tag equals script version
+              shell: powershell
+              run: |
+                  $tagRef = "${{ github.ref }}"
+                  $tag = $tagRef -replace '^refs/tags/', ''
+                  Write-Host "Tag: $tag"
+                  $out = & .\UsbIpdTool.ps1 -Version 2>&1
+                  $txt = $out -join "`n"
+                  Write-Host "Script output: $txt"
+                  if ($txt -match 'UsbIpdTool\s+([0-9]+(\.[0-9]+)*?)') {
+                    $ver = $Matches[1]
+                  } else {
+                    Write-Error 'Could not parse version from script output'
+                    exit 1
+                  }
+                  $tagNorm = $tag -replace '^[vV]', ''
+                  Write-Host "Script version: $ver ; Tag normalised: $tagNorm"
+                  if ($ver -ne $tagNorm) {
+                    Write-Error "Tag version ($tagNorm) does not match script version ($ver)"
+                    exit 1
+                  }
+                  Write-Host 'Tag matches script version.'

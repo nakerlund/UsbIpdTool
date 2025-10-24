@@ -1,0 +1,37 @@
+name: Test
+
+on:
+    push: {}
+
+jobs:
+    test-version:
+        name: Smoke test on Windows PowerShell 5.1
+        runs-on: windows-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Run script with Windows PowerShell (non-interactive)
+              # Use the 'powershell' shell to ensure Windows PowerShell (5.1) is used, not pwsh
+              shell: powershell
+              run: |
+                  Write-Host "Running smoke test on Windows PowerShell"
+                  Write-Host "PSVersion: $($PSVersionTable.PSVersion)"
+                  # Run the script in non-interactive mode to verify it executes under Windows PowerShell 5.1
+                  $out = & .\UsbIpdTool.ps1 -Version 2>&1
+                  $txt = $out -join "`n"
+                  Write-Host "--- script output ---"
+                  Write-Host $txt
+                  Write-Host "--- end output ---"
+                  if ($txt -notmatch 'UsbIpdTool\s+[0-9]') {
+                    Write-Error 'UsbIpdTool banner missing from -Version output'
+                    exit 1
+                  }
+                  # Parse and validate the version string (require at least major.minor.patch)
+                  if ($txt -match 'UsbIpdTool\s+([0-9]+(\.[0-9]+){2,3})') {
+                    $smokeVer = $Matches[1]
+                    Write-Host "Detected script version: $smokeVer"
+                  } else {
+                    Write-Error 'Could not parse semantic version (major.minor.patch) from -Version output'
+                    exit 1
+                  }
